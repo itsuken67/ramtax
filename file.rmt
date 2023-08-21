@@ -1,0 +1,22 @@
+$BOOT
+#$GET notiobase.txt
+$MEAN WIDTH_T 80
+
+func dword len : dword Str do:
+	init dword i = 0
+	until *(Str + i) = 0 do:
+		inc i
+	end.
+	equ len = i
+end.
+
+HOME: 
+	init str byte RAM = "Ramonter!\0"
+	init dword it
+	equ it = WIDTH_T * len {*RAM}
+HEND.
+
+
+# code/from 3 = "tert"
+# 0, x0 - xff, a, b, t, n, v, f, r, "
+

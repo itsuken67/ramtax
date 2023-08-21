@@ -1,0 +1,323 @@
+$MEAN WIDTH_T 80
+$MEAN HEIGHT_T 25
+
+code_asm:
+
+macro ByteToASCII value, rcv
+{
+	pusha
+	xor ah, ah
+	mov al, value
+	push ax
+	push rcv
+	call _ByteToASCII
+	popa
+}
+
+_ByteToASCII: ;push value (al), push rcv
+	pop cx
+	mov [TECX], ecx
+	pop si
+	pop ax
+	inc si
+	inc si
+	mov bl, 10
+	mov cx, 3
+_NumToASCII_div:
+	div bl
+	push ax
+	add ah, 30h
+	mov [si], ah
+	pop ax
+	dec si
+	xor ah, ah
+	loop _NumToASCII_div
+;remove_nulls
+	inc si
+	mov ah, '0'
+	mov al, ' '
+	mov cx, 2
+_NumToASCII_a:
+	cmp [si], ah
+	jne _NumToASCII_end
+	mov bl, [si + 1]
+	mov [si], bl
+	mov bl, [si + 2]
+	mov [si + 1], bl
+	mov [si + 2], al
+	loop _NumToASCII_a
+_NumToASCII_end:
+	mov ecx, [TECX]
+	push cx
+	RET
+
+inputFunc: ;push len, push X-Y
+	pop cx
+	pop dx
+	xchg dh, dl
+	pop bx
+	mov [TEBX], ebx
+	push cx
+	call cleanBuff
+;cursor
+	xor bx, bx
+	mov ah, 02h
+	int 10h
+	mov si, buff
+_inpute_writing:
+	mov ah, 0 ;считать клавишу с клавиатуры
+	int 16h
+	cmp al, 0dh ;ne enter li eto?
+	je _inpute_stop_input
+	cmp al, 08h ;не backspace li eto?
+	jne _inpute_nbkspce ;нет
+	pushf
+	cmp cl, 0 ;стоит ли курсор в начале (можно ли стирать)
+	jne _inpute_f
+	popf
+	jmp _inpute_writing
+_inpute_f:
+	cmp dl, 0 ;у границы экрана?
+	jne _inpute_d
+	mov dl, 80 
+	dec dh ;на строку выше
+_inpute_d:
+	dec dl ;на букву меньше
+	xor al, al
+	mov ah, 02h ;двигаем курсор
+	int 10h
+	dec cl ;less symbols
+	dec si
+	popf 
+_inpute_nbkspce:
+	pushf
+	mov ebx, [TEBX]
+	cmp cl, bl ; 128
+	jne _inpute_e
+	popf
+	jmp _inpute_writing
+_inpute_e:
+	push cx ;f
+	mov cx, 1
+	mov ah, 0ah ;записать символ в позиции курсора
+	int 10h
+	pop cx ;f
+	cmp dx, 0x184F	
+	jl _inpute_a
+	call MOVE_SCRN_UP
+	dec dh
+_inpute_a:
+	mov [si], al
+	popf
+	je _inpute_gog
+	inc si
+	inc cl
+	inc dl ;двигаемся по х
+	cmp dl, 80 ;достигло ли края экрана
+	jb _inpute_go
+	xor dl, dl ;обнуляем
+	inc dh ;двигаемся по у
+_inpute_go:
+	mov ah, 02h ;двигаем курсор
+	int 10h
+_inpute_gog:
+	ByteToASCII cl, symbol
+	print symbol, 1Eh, 76, 0
+	jmp _inpute_writing
+_inpute_stop_input:
+	cmp dh, 24
+	jl _inpute_b
+	call MOVE_SCRN_UP
+	jmp _inpute_c
+_inpute_b:
+	inc dh
+_inpute_c:
+	xor dl, dl
+	mov ah, 02h ;двигаем курсор
+	int 10h
+	RET
+
+getCursorPos:
+	push ax
+	push bx
+	xor bh, bh
+	mov ah, 3
+	int 10h
+	pop bx
+	pop ax
+	RET
+
+printSymb: ;push X-Y, push LEN, push SYM (al)
+	pop dx
+	pop bx ;sym
+	pop cx ;len
+	pop ax ;x-y
+	push dx
+	push 0xB800
+	pop es
+	push bx
+	mov bh, 80
+	xchg ah, bl
+	mul bh ;y * 80
+	xor bh, bh
+	add ax, bx ;x + y * 80
+	shl ax, 1 ; x2
+	mov di, ax ;2 * (x + y * 80)
+	pop bx
+_printSymb_a:
+	mov [es:di], bx
+	inc di
+	inc di
+	loop _printSymb_a
+	mov ax, di
+	shr ax, 1 ;/ 2
+	;add ax, 1
+	mov bh, 80
+	div bh
+	mov dl, ah
+	mov dh, al
+	xor bh, bh
+	mov ah, 2
+	int 0x10
+	mov [TEDX], edx
+	RET
+	
+
+
+printe: ;push COL (ah), push X-Y, push STR
+	pop cx
+	pop si ;STR
+	pop ax  ;X-Y
+
+	mov bh, 80
+	xchg ah, bl
+	mul bh ;y * 80
+	xor bh, bh
+	add ax, bx ;x + y * 80
+	shl ax, 1 ; x2
+	mov di, ax ;2 * (x + y * 80)
+	pop ax   ;COL
+	shl ax, 8
+	push 0xB800
+	pop es
+	push cx
+	
+_printe_next:
+	cmp di, 2 * WIDTH_T * HEIGHT_T
+	jl _printe_a
+	call MOVE_SCRN_UP
+	sub di, 2 * WIDTH_T
+	jmp _printe_next
+_printe_a:
+	mov al, [si]
+	cmp al, 0x0D ;энтер ли это?
+	jne _printe_not_enter ;нет
+	cmp di, 2 * (WIDTH_T * (HEIGHT_T - 1)) ;находится дальше чем в конце предпоследней строки?
+	jle _printe_NoNeedToScroll ;no
+	call MOVE_SCRN_UP
+	mov di, 2 * WIDTH_T * (HEIGHT_T - 1)
+	inc si
+	jmp _printe_next ;
+_printe_NoNeedToScroll:
+	push ax
+	push bx
+	mov ax, di
+	mov bl, WIDTH_T * 2
+	div bl
+	mul bl
+	mov di, ax
+	add di, WIDTH_T * 2
+	inc si
+	pop bx
+	pop ax
+	jmp _printe_next ;
+_printe_not_enter:
+	cmp al, 0 ;последний ли символ?
+	jz _printe_end
+	mov [es:di], ax
+	inc si
+	inc di
+	inc di
+	jmp _printe_next
+_printe_end:
+	mov ax, di
+	shr ax, 1 ;/ 2
+	;add ax, 1
+	mov bh, 80
+	div bh
+	mov dl, ah
+	mov dh, al
+	mov [TEDX], edx
+	ret
+
+MOVE_SCRN_UP:
+	pusha
+	mov cx, 0x0100 ; 1, 0, левый верх
+	mov dx, 0x184F ;25 - 1, 80 - 1, правый низ
+	mov al, 1
+	mov bh, 0x07
+	mov ah, 06h
+	int 0x10
+	popa
+	RET
+
+cleanBuff:
+	mov si, buff
+	mov cx, 128
+	xor al, al
+	mov [si], al ;to zero
+	inc si
+	loop ($ - 3) ;do 128 times
+	sub si, 128
+	ret
+
+cleanFormatBuff:
+	mov si, _FORMAT_BUFF
+	mov cx, 128
+	xor eax, eax
+cleanFormatBuff_DO:
+	mov [si], eax ;to zero
+	add si, 4
+	loop cleanFormatBuff_DO ;do 128 times
+	ret
+
+CMPE_WITH_BUFF:
+	pop cx
+	pop di
+	push cx
+	mov cx, 128
+	
+	RET
+
+MoveToNearestSpace:
+	push dx
+	mov dl, ' '
+_MoveToNearestSpace_checkForSpace:
+	cmp [si], dl
+	jne MoveToNearestSpace_w
+	inc si
+	cmp si, buff + 128
+	je _PRC_BAD_MVTOs
+	jmp _MoveToNearestSpace_checkForSpace
+MoveToNearestSpace_w:
+	pop dx
+	RET
+
+cleanCOMMON:
+	push eax
+	push si
+	push cx
+	mov si, _COMMON
+	mov cx, 4
+	xor eax, eax
+_cleanCOMMON_DO:
+	mov [si], eax
+	add si, 4
+	loop _cleanCOMMON_DO
+	pop cx
+	pop si
+	pop eax
+	RET
+
+asm_end.
+		
